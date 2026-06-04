@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>PLGY</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Manrope:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0d0d0d; --bg2: #161616; --bg3: #1f1f1f;
+    --accent: #c8ff00; --text: #f0f0f0; --muted: #888; --border: #2a2a2a;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { background: var(--bg); color: var(--text); font-family: 'Manrope', sans-serif; min-height: 100vh; }
+
+  header { position: sticky; top: 0; z-index: 50; background: rgba(13,13,13,0.95); backdrop-filter: blur(10px); padding: 14px 16px; display: flex; align-items: center; justify-content: space-between; border-bottom: 0.5px solid var(--border); }
+  .logo { font-family: 'Bebas Neue', sans-serif; font-size: 28px; letter-spacing: 4px; color: var(--accent); }
+  .cart-btn { background: var(--bg3); border: 0.5px solid var(--border); border-radius: 10px; padding: 8px 14px; color: var(--text); font-family: 'Manrope', sans-serif; font-size: 13px; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 8px; position: relative; }
+  .cart-badge { background: var(--accent); color: #000; font-size: 10px; font-weight: 700; min-width: 18px; height: 18px; border-radius: 50%; display: flex; align-items: center; justify-content: center; position: absolute; top: -7px; right: -7px; opacity: 0; transition: opacity 0.2s; }
+  .cart-badge.show { opacity: 1; }
+
+  .cats { display: flex; gap: 8px; padding: 12px 16px; overflow-x: auto; scrollbar-width: none; border-bottom: 0.5px solid var(--border); }
+  .cats::-webkit-scrollbar { display: none; }
+  .cat { background: var(--bg3); border: 0.5px solid var(--border); border-radius: 20px; padding: 6px 16px; color: var(--muted); font-family: 'Manrope', sans-serif; font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap; transition: all 0.15s; }
+  .cat.active { background: var(--accent); color: #000; border-color: var(--accent); }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 14px 16px 100px; }
+  .card { background: var(--bg2); border: 0.5px solid var(--border); border-radius: 14px; overflow: hidden; cursor: pointer; transition: transform 0.15s, border-color 0.15s; }
+  .card:active { transform: scale(0.97); }
+  .card.in-cart { border-color: var(--accent); }
+
+  .card-img { width: 100%; height: 160px; background: var(--bg3); display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  .card-img img { width: 100%; height: 100%; object-fit: cover; }
+  .card-img .no-photo { font-size: 40px; }
+
+  .card-body { padding: 10px; }
+  .card-cat { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 3px; }
+  .card-name { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 3px; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .card-price { font-family: 'Bebas Neue', sans-serif; font-size: 20px; color: var(--accent); letter-spacing: 1px; margin-bottom: 7px; }
+  .sizes { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 9px; }
+  .sz { background: var(--bg); border: 0.5px solid var(--border); color: var(--muted); font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 5px; }
+  .add-btn { width: 100%; background: var(--accent); border: none; border-radius: 8px; color: #000; font-family: 'Manrope', sans-serif; font-size: 12px; font-weight: 700; padding: 8px; cursor: pointer; }
+  .add-btn.added { background: var(--bg3); color: var(--accent); border: 0.5px solid var(--accent); }
+
+  .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; background: rgba(13,13,13,0.97); backdrop-filter: blur(10px); border-top: 0.5px solid var(--border); padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); display: none; }
+  .bottom-nav.show { display: block; }
+  .order-btn { width: 100%; background: var(--accent); border: none; border-radius: 12px; color: #000; font-family: 'Manrope', sans-serif; font-size: 15px; font-weight: 700; padding: 15px; cursor: pointer; display: flex; align-items: center; justify-content: space-between; }
+  .order-btn span.total { font-family: 'Bebas Neue', sans-serif; font-size: 18px; letter-spacing: 1px; }
+
+  .sheet-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 100; display: none; align-items: flex-end; }
+  .sheet-overlay.open { display: flex; }
+  .sheet { background: var(--bg2); border-radius: 20px 20px 0 0; border-top: 0.5px solid var(--border); width: 100%; padding: 20px 16px calc(20px + env(safe-area-inset-bottom)); max-height: 75vh; overflow-y: auto; }
+  .sheet-handle { width: 36px; height: 4px; background: var(--border); border-radius: 2px; margin: 0 auto 18px; }
+  .sheet-title { font-family: 'Bebas Neue', sans-serif; font-size: 24px; letter-spacing: 2px; margin-bottom: 16px; }
+  .ci { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 0.5px solid var(--border); }
+  .ci-img { width: 48px; height: 48px; border-radius: 8px; background: var(--bg3); overflow: hidden; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 24px; }
+  .ci-img img { width: 100%; height: 100%; object-fit: cover; }
+  .ci-info { flex: 1; }
+  .ci-name { font-size: 13px; font-weight: 500; }
+  .ci-price { font-size: 13px; color: var(--accent); margin-top: 2px; }
+  .ci-rm { background: none; border: none; color: var(--muted); font-size: 18px; cursor: pointer; padding: 4px; }
+  .cart-total-row { display: flex; justify-content: space-between; padding: 16px 0 12px; }
+  .ct-label { font-size: 14px; color: var(--muted); }
+  .ct-amount { font-family: 'Bebas Neue', sans-serif; font-size: 26px; color: var(--accent); }
+  .tg-btn { width: 100%; background: var(--accent); border: none; border-radius: 12px; color: #000; font-family: 'Manrope', sans-serif; font-size: 15px; font-weight: 700; padding: 15px; cursor: pointer; margin-top: 4px; }
+  .empty { text-align: center; padding: 40px 0; color: var(--muted); font-size: 14px; }
+  
+  .loading { text-align: center; padding: 60px 20px; color: var(--muted); }
+  .loading-dot { display: inline-block; width: 8px; height: 8px; background: var(--accent); border-radius: 50%; margin: 0 3px; animation: bounce 1s infinite; }
+  .loading-dot:nth-child(2) { animation-delay: 0.2s; }
+  .loading-dot:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes bounce { 0%,80%,100%{transform:scale(0)} 40%{transform:scale(1)} }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">PLGY</div>
+  <button class="cart-btn" onclick="openCart()">
+    🛍 Корзина
+    <span class="cart-badge" id="cart-badge">0</span>
+  </button>
+</header>
+
+<div class="cats" id="cats">
+  <button class="cat active" onclick="filterCat(this,'all')">Все</button>
+</div>
+
+<div class="grid" id="grid">
+  <div class="loading" style="grid-column:1/-1">
+    <div style="margin-bottom:16px;font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:2px;color:var(--accent)">PLGY</div>
+    <span class="loading-dot"></span>
+    <span class="loading-dot"></span>
+    <span class="loading-dot"></span>
+    <div style="margin-top:12px;font-size:13px">Загружаем товары...</div>
+  </div>
+</div>
+
+<div class="bottom-nav" id="bottom-nav">
+  <button class="order-btn" onclick="openCart()">
+    <span>Оформить заказ</span>
+    <span class="total" id="bottom-total">0 ₽</span>
+  </button>
+</div>
+
+<div class="sheet-overlay" id="sheet" onclick="closeCartSheet(event)">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title">Корзина</div>
+    <div id="cart-items"></div>
+  </div>
+</div>
+
+<script>
+const SERVER = 'REPLACE_WITH_SERVER_URL';
+const TG = 'plgymanager';
+
+let allProducts = [];
+let cart = [];
+let activeCat = 'all';
+
+const CATS = {
+  'all':            'Все',
+  'Мужская обувь':  'Муж. обувь',
+  'Женская обувь':  'Жен. обувь',
+  'Мужская одежда': 'Муж. одежда',
+  'Женская одежда': 'Жен. одежда',
+  'Сумки':          'Сумки',
+  'Аксессуары':     'Аксессуары',
+  'Украшения':      'Украшения',
+  'Для дома':       'Для дома',
+};
+
+const EMOJI = {
+  'Мужская обувь':'👟','Женская обувь':'👠','Мужская одежда':'👔',
+  'Женская одежда':'👗','Сумки':'👜','Аксессуары':'🧢','Украшения':'💍','Для дома':'🏠'
+};
+
+async function loadProducts() {
+  try {
+    const r = await fetch(SERVER + '/products');
+    const d = await r.json();
+    allProducts = d.products || [];
+    buildCats();
+    renderGrid();
+  } catch(e) {
+    document.getElementById('grid').innerHTML =
+      '<div class="empty" style="grid-column:1/-1">Не удалось загрузить товары.<br>Попробуйте позже.</div>';
+  }
+}
+
+function buildCats() {
+  const cats = ['all', ...new Set(allProducts.map(p => p.category))];
+  const el = document.getElementById('cats');
+  el.innerHTML = cats.map(c =>
+    `<button class="cat ${c===activeCat?'active':''}" onclick="filterCat(this,'${c}')">${CATS[c]||c}</button>`
+  ).join('');
+}
+
+function photoUrl(fileId) {
+  if (!fileId) return null;
+  return SERVER + '/photo/' + fileId;
+}
+
+function renderGrid() {
+  const filtered = activeCat === 'all'
+    ? allProducts
+    : allProducts.filter(p => p.category === activeCat);
+
+  if (filtered.length === 0) {
+    document.getElementById('grid').innerHTML =
+      '<div class="empty" style="grid-column:1/-1">Товары появятся когда будут новые посты в канале</div>';
+    return;
+  }
+
+  document.getElementById('grid').innerHTML = filtered.map(p => {
+    const inCart = cart.some(c => c.id === p.id);
+    const img = p.photo
+      ? `<img src="${photoUrl(p.photo)}" loading="lazy" onerror="this.parentElement.innerHTML='<span class=no-photo>${EMOJI[p.category]||'📦'}</span>'">`
+      : `<span class="no-photo">${EMOJI[p.category]||'📦'}</span>`;
+    const price = p.price ? p.price.toLocaleString('ru-RU') + ' ₽' : 'Цена по запросу';
+    const sizes = p.sizes.length ? `<div class="sizes">${p.sizes.map(s=>`<span class="sz">${s}</span>`).join('')}</div>` : '';
+    return `<div class="card ${inCart?'in-cart':''}">
+      <div class="card-img">${img}</div>
+      <div class="card-body">
+        <div class="card-cat">${p.category}</div>
+        <div class="card-name">${p.name}</div>
+        <div class="card-price">${price}</div>
+        ${sizes}
+        <button class="add-btn ${inCart?'added':''}" onclick="toggleCart('${p.id}')">
+          ${inCart ? '✓ Добавлено' : '+ В корзину'}
+        </button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function toggleCart(id) {
+  const idx = cart.findIndex(c => c.id === id);
+  if (idx > -1) cart.splice(idx, 1);
+  else cart.push(allProducts.find(p => p.id === id));
+  updateBadge();
+  renderGrid();
+  renderCartSheet();
+}
+
+function updateBadge() {
+  const total = cart.reduce((s,i) => s + (i.price||0), 0);
+  const badge = document.getElementById('cart-badge');
+  badge.textContent = cart.length;
+  badge.classList.toggle('show', cart.length > 0);
+  document.getElementById('bottom-nav').classList.toggle('show', cart.length > 0);
+  document.getElementById('bottom-total').textContent = total.toLocaleString('ru-RU') + ' ₽';
+}
+
+function renderCartSheet() {
+  const el = document.getElementById('cart-items');
+  if (!cart.length) {
+    el.innerHTML = '<div class="empty">Корзина пуста</div>';
+    return;
+  }
+  const total = cart.reduce((s,i) => s+(i.price||0), 0);
+  el.innerHTML = cart.map(i => {
+    const img = i.photo
+      ? `<img src="${photoUrl(i.photo)}" onerror="this.parentElement.innerHTML='${EMOJI[i.category]||'📦'}'">` 
+      : (EMOJI[i.category]||'📦');
+    const price = i.price ? i.price.toLocaleString('ru-RU') + ' ₽' : 'По запросу';
+    return `<div class="ci">
+      <div class="ci-img">${img}</div>
+      <div class="ci-info">
+        <div class="ci-name">${i.name}</div>
+        <div class="ci-price">${price}</div>
+      </div>
+      <button class="ci-rm" onclick="toggleCart('${i.id}')">✕</button>
+    </div>`;
+  }).join('') + `
+    <div class="cart-total-row">
+      <span class="ct-label">Итого</span>
+      <span class="ct-amount">${total.toLocaleString('ru-RU')} ₽</span>
+    </div>
+    <button class="tg-btn" onclick="sendOrder()">✈️ Написать продавцу в Telegram</button>`;
+}
+
+function openCart() {
+  renderCartSheet();
+  document.getElementById('sheet').classList.add('open');
+}
+
+function closeCartSheet(e) {
+  if (e.target === document.getElementById('sheet'))
+    document.getElementById('sheet').classList.remove('open');
+}
+
+function filterCat(btn, cat) {
+  activeCat = cat;
+  document.querySelectorAll('.cat').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderGrid();
+}
+
+function sendOrder() {
+  if (!cart.length) return;
+  const items = cart.map(i => `• ${i.name} — ${i.price ? i.price.toLocaleString('ru-RU')+'₽' : 'уточнить цену'}`).join('%0A');
+  const total = cart.reduce((s,i)=>s+(i.price||0),0).toLocaleString('ru-RU');
+  const text = `Привет! Хочу сделать заказ 🛍%0A%0A${items}%0A%0AИтого: ${total} ₽`;
+  const url = `https://t.me/${TG}?text=${text}`;
+  if (window.Telegram?.WebApp) window.Telegram.WebApp.openTelegramLink(url);
+  else window.open(url, '_blank');
+}
+
+if (window.Telegram?.WebApp) {
+  window.Telegram.WebApp.ready();
+  window.Telegram.WebApp.expand();
+}
+
+loadProducts();
+</script>
+</body>
+</html>
