@@ -1,12 +1,17 @@
 const express = require('express');
 const https = require('https');
+const http = require('http');
 const fs = require('fs');
+const path = require('path');
 const app = express();
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const PORT = process.env.PORT || 3000;
 const DB_FILE = '/tmp/products.json';
 const PENDING_FILE = '/tmp/pending.json';
+const PHOTOS_DIR = '/tmp/photos';
+
+if (!fs.existsSync(PHOTOS_DIR)) fs.mkdirSync(PHOTOS_DIR);
 
 const CHANNELS = {
   'plgymenshoes':     '\u041c\u0443\u0436\u0441\u043a\u0430\u044f \u043e\u0431\u0443\u0432\u044c',
@@ -20,24 +25,55 @@ const CHANNELS = {
 };
 
 app.use(express.json());
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  next();
-});
+app.use((req, res, next) => { res.header('Access-Control-Allow-Origin', '*'); next(); });
+app.use('/photos', express.static(PHOTOS_DIR));
 
 function loadDB() {
   try { if (fs.existsSync(DB_FILE)) return JSON.parse(fs.readFileSync(DB_FILE, 'utf8')); } catch(e) {}
   return [];
 }
-function saveDB(p) {
-  try { fs.writeFileSync(DB_FILE, JSON.stringify(p), 'utf8'); } catch(e) {}
-}
+function saveDB(p) { try { fs.writeFileSync(DB_FILE, JSON.stringify(p), 'utf8'); } catch(e) {} }
 function loadPending() {
   try { if (fs.existsSync(PENDING_FILE)) return JSON.parse(fs.readFileSync(PENDING_FILE, 'utf8')); } catch(e) {}
   return {};
 }
-function savePending(p) {
-  try { fs.writeFileSync(PENDING_FILE, JSON.stringify(p), 'utf8'); } catch(e) {}
+function savePending(p) { try { fs.writeFileSync(PENDING_FILE, JSON.stringify(p), 'utf8'); } catch(e) {} }
+
+function tgGet(url) {
+  return new Promise((resolve, reject) => {
+    https.get(url, r => {
+      let d = '';
+      r.on('data', c => d += c);
+      r.on('end', () => { try { resolve(JSON.parse(d)); } catch(e) { reject(e); } });
+    }).on('error', reject);
+  });
+}
+
+function downloadFile(url, dest) {
+  return new Promise((resolve, reject) => {
+    const proto = url.startsWith('https') ? https : http;
+    const file = fs.createWriteStream(dest);
+    proto.get(url, r => {
+      r.pipe(file);
+      file.on('finish', () => { file.close(); resolve(dest); });
+    }).on('error', e => { fs.unlink(dest, ()=>{}); reject(e); });
+  });
+}
+
+async function savePhoto(fileId) {
+  try {
+    const info = await tgGet(`https://api.telegram.org/bot${BOT_TOKEN}/getFile?file_id=${fileId}`);
+    if (!info.ok) return null;
+    const tgUrl = `https://api.telegram.org/file/bot${BOT_TOKEN}/${info.result.file_path}`;
+    const ext = path.extname(info.result.file_path) || '.jpg';
+    const filename = fileId.slice(-20).replace(/[^a-zA-Z0-9]/g, '') + ext;
+    const dest = path.join(PHOTOS_DIR, filename);
+    await downloadFile(tgUrl, dest);
+    return filename;
+  } catch(e) {
+    console.error('Photo download error:', e.message);
+    return null;
+  }
 }
 
 function parsePost(msg, category) {
@@ -63,30 +99,43 @@ function parsePost(msg, category) {
     }
   }
 
-  const photo = msg.photo ? msg.photo[msg.photo.length - 1].file_id : null;
+  const fileId = msg.photo ? msg.photo[msg.photo.length - 1].file_id : null;
 
-  return {
+  return { fileId, text, lines, name, price, sizes,
     id: `${msg.chat.username}_${msg.message_id}`,
-    channel: msg.chat.username,
-    category,
-    name,
-    price,
-    sizes,
-    photo,
-    date: msg.date,
-  };
+    channel: msg.chat.username, category, date: msg.date };
 }
 
-// Flush a pending media group вЂ” pick best message (has caption) and save
+async function processAndSave(msg, category) {
+  const parsed = parsePost(msg, category);
+  if (!parsed) return;
+
+  let photoName = null;
+  if (parsed.fileId) {
+    photoName = await savePhoto(parsed.fileId);
+  }
+
+  const product = {
+    id: parsed.id, channel: parsed.channel, category: parsed.category,
+    name: parsed.name, price: parsed.price, sizes: parsed.sizes,
+    photo: photoName, date: parsed.date,
+  };
+
+  const products = loadDB();
+  const idx = products.findIndex(p => p.id === product.id);
+  if (idx > -1) products[idx] = product;
+  else products.unshift(product);
+  saveDB(products.slice(0, 2000));
+  console.log('Saved:', product.name, '|', product.price, '|', product.photo || 'no photo');
+}
+
 function flushGroup(groupId) {
   const pending = loadPending();
   const msgs = pending[groupId];
   if (!msgs || !msgs.length) return;
-
   delete pending[groupId];
   savePending(pending);
 
-  // Find message with caption (has product info)
   const withCaption = msgs.find(m => m.caption);
   const withPhoto = msgs.find(m => m.photo);
   if (!withCaption) return;
@@ -94,72 +143,34 @@ function flushGroup(groupId) {
   const category = CHANNELS[withCaption.chat.username];
   if (!category) return;
 
-  // Attach photo from another message in group if caption message has no photo
   if (!withCaption.photo && withPhoto) withCaption.photo = withPhoto.photo;
-
-  const product = parsePost(withCaption, category);
-  if (!product) return;
-
-  const products = loadDB();
-  const idx = products.findIndex(p => p.id === product.id);
-  if (idx > -1) products[idx] = product;
-  else products.unshift(product);
-  saveDB(products.slice(0, 2000));
-  console.log('Saved (group):', product.name, '|', product.price, '|', product.photo ? 'has photo' : 'no photo');
+  processAndSave(withCaption, category);
 }
 
 app.post('*', (req, res) => {
   res.sendStatus(200);
-  const update = req.body;
-  const msg = update.channel_post;
+  const msg = req.body.channel_post;
   if (!msg || !msg.chat) return;
 
-  const username = msg.chat.username;
-  const category = CHANNELS[username];
+  const category = CHANNELS[msg.chat.username];
   if (!category) return;
 
-  // Media group (album) вЂ” collect all parts then flush
   if (msg.media_group_id) {
     const pending = loadPending();
     if (!pending[msg.media_group_id]) pending[msg.media_group_id] = [];
     pending[msg.media_group_id].push(msg);
     savePending(pending);
-    // Flush after short delay (last message in group)
     setTimeout(() => flushGroup(msg.media_group_id), 3000);
     return;
   }
 
-  // Single message
-  const product = parsePost(msg, category);
-  if (!product) return;
-
-  const products = loadDB();
-  const idx = products.findIndex(p => p.id === product.id);
-  if (idx > -1) products[idx] = product;
-  else products.unshift(product);
-  saveDB(products.slice(0, 2000));
-  console.log('Saved:', product.name, '|', product.price, '|', product.photo ? 'has photo' : 'no photo');
+  processAndSave(msg, category);
 });
 
 app.get('/products', (req, res) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   const products = loadDB();
   res.end(JSON.stringify({ ok: true, count: products.length, products }));
-});
-
-app.get('/photo/:file_id', (req, res) => {
-  const url = `https://api.telegram.org/bot${BOT_TOKEN}/getFile?file_id=${req.params.file_id}`;
-  https.get(url, r => {
-    let d = '';
-    r.on('data', c => d += c);
-    r.on('end', () => {
-      try {
-        const f = JSON.parse(d);
-        if (f.ok) res.redirect(`https://api.telegram.org/file/bot${BOT_TOKEN}/${f.result.file_path}`);
-        else res.status(404).send('Not found');
-      } catch(e) { res.status(500).send('Error'); }
-    });
-  });
 });
 
 app.get('/health', (req, res) => {
