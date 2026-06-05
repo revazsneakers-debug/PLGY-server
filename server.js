@@ -8,18 +8,17 @@ const PORT = process.env.PORT || 3000;
 const DB_FILE = '/tmp/products.json';
 
 const CHANNELS = {
-  'plgymenshoes':     'Мужская обувь',
-  'plgywomanshoes':   'Женская обувь',
-  'plgymenclothes':   'Мужская одежда',
-  'plgywomenclothes': 'Женская одежда',
-  'plgymenbags':      'Сумки',
-  'plgyaccessories':  'Аксессуары',
-  'plgyjewelry':      'Украшения',
-  'plgyposuda':       'Для дома',
+  'plgymenshoes':     'РњСѓР¶СЃРєР°СЏ РѕР±СѓРІСЊ',
+  'plgywomanshoes':   'Р–РµРЅСЃРєР°СЏ РѕР±СѓРІСЊ',
+  'plgymenclothes':   'РњСѓР¶СЃРєР°СЏ РѕРґРµР¶РґР°',
+  'plgywomenclothes': 'Р–РµРЅСЃРєР°СЏ РѕРґРµР¶РґР°',
+  'plgymenbags':      'РЎСѓРјРєРё',
+  'plgyaccessories':  'РђРєСЃРµСЃСЃСѓР°СЂС‹',
+  'plgyjewelry':      'РЈРєСЂР°С€РµРЅРёСЏ',
+  'plgyposuda':       'Р”Р»СЏ РґРѕРјР°',
 };
 
 app.use(express.json());
-
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   next();
@@ -33,7 +32,7 @@ function loadDB() {
 }
 
 function saveDB(products) {
-  fs.writeFileSync(DB_FILE, JSON.stringify(products));
+  try { fs.writeFileSync(DB_FILE, JSON.stringify(products)); } catch(e) {}
 }
 
 function parsePost(msg, category) {
@@ -41,15 +40,15 @@ function parsePost(msg, category) {
   if (!text || text.length < 5) return null;
 
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
-  const name = lines[0].replace(/[^\wа-яёА-ЯЁ\s\-]/gu, '').trim();
-  if (!name || name.length < 3) return null;
+  const name = lines[0].replace(/[рџЏ·пёЏрџ‘џрџ‘ рџ‘њрџ’Ќрџ§Ґрџ‘”рџ©ґрџ“ђрџ’°вњ€пёЏ]/gu, '').trim();
+  if (!name || name.length < 2) return null;
 
-  const priceMatch = text.match(/(\d[\d\s]{2,})\s*[₽р]/i) ||
-                     text.match(/[Сс]тоимость[^\d]*(\d[\d\s]+)/i) ||
-                     text.match(/[Цц]ена[^\d]*(\d[\d\s]+)/i);
+  const priceMatch = text.match(/(\d[\d\s]{1,})\s*[в‚ЅСЂ]/i) ||
+                     text.match(/[РЎСЃ]С‚РѕРёРјРѕСЃС‚СЊ[^\d]*(\d[\d\s]+)/i) ||
+                     text.match(/[Р¦С†]РµРЅР°[^\d]*(\d[\d\s]+)/i);
   const price = priceMatch ? parseInt(priceMatch[1].replace(/\s/g,'')) : null;
 
-  const sizesMatch = text.match(/[Рр]азмер[ыа]?[:\s]*([0-9\/\-,\s]+)/i);
+  const sizesMatch = text.match(/[Р СЂ]Р°Р·РјРµСЂ[С‹Р°]?[:\s]*([0-9\/\-,\s]+)/i);
   const sizes = sizesMatch
     ? sizesMatch[1].split(/[\/,]/).map(s=>s.trim()).filter(s=>s.match(/^\d+$/)).slice(0,10)
     : [];
@@ -68,36 +67,39 @@ function parsePost(msg, category) {
   };
 }
 
-// Webhook — Telegram sends every new post here
-app.post(`/webhook/${BOT_TOKEN}`, (req, res) => {
+// Webhook endpoint вЂ” accepts ALL paths with token
+app.post('*', (req, res) => {
   res.sendStatus(200);
   const update = req.body;
+  console.log('Update received:', JSON.stringify(update).substring(0, 200));
+
   const msg = update.channel_post;
   if (!msg || !msg.chat) return;
 
   const username = msg.chat.username;
   const category = CHANNELS[username];
-  if (!category) return;
+  if (!category) {
+    console.log('Unknown channel:', username);
+    return;
+  }
 
   const product = parsePost(msg, category);
-  if (!product) return;
+  if (!product) {
+    console.log('Could not parse post');
+    return;
+  }
 
   const products = loadDB();
-  const idx = products.findIndex(p => p.id === product.id);
-  if (idx > -1) products[idx] = product;
-  else products.unshift(product);
-
+  products.unshift(product);
   saveDB(products.slice(0, 2000));
-  console.log(`Saved: ${product.name} (${category})`);
+  console.log(`вњ… Saved: ${product.name} (${category})`);
 });
 
-// Mini App fetches products here
 app.get('/products', (req, res) => {
   const products = loadDB();
   res.json({ ok: true, count: products.length, products });
 });
 
-// Get photo URL
 app.get('/photo/:file_id', (req, res) => {
   const url = `https://api.telegram.org/bot${BOT_TOKEN}/getFile?file_id=${req.params.file_id}`;
   https.get(url, r => {
