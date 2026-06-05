@@ -18,42 +18,48 @@ const CHANNELS = {
   'plgyposuda':       'Р”Р»СЏ РґРѕРјР°',
 };
 
-app.use(express.json());
+app.use(express.json({ strict: false }));
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
+  res.header('Content-Type', 'application/json; charset=utf-8');
   next();
 });
 
 function loadDB() {
   try {
-    if (fs.existsSync(DB_FILE)) return JSON.parse(fs.readFileSync(DB_FILE));
+    if (fs.existsSync(DB_FILE)) return JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
   } catch(e) {}
   return [];
 }
 
 function saveDB(products) {
-  try { fs.writeFileSync(DB_FILE, JSON.stringify(products)); } catch(e) {}
+  try { fs.writeFileSync(DB_FILE, JSON.stringify(products, null, 0), 'utf8'); } catch(e) { console.error('saveDB error', e); }
 }
 
 function parsePost(msg, category) {
-  const text = msg.text || msg.caption || '';
-  if (!text || text.length < 5) return null;
+  const text = (msg.text || msg.caption || '').trim();
+  if (!text || text.length < 3) return null;
 
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
-  const name = lines[0].replace(/[рџЏ·пёЏрџ‘џрџ‘ рџ‘њрџ’Ќрџ§Ґрџ‘”рџ©ґрџ“ђрџ’°вњ€пёЏ]/gu, '').trim();
+  
+  // Name = first non-empty line, strip emojis
+  const name = lines[0].replace(/[\u{1F300}-\u{1FFFF}]/gu, '').trim();
   if (!name || name.length < 2) return null;
 
-  const priceMatch = text.match(/(\d[\d\s]{1,})\s*[в‚ЅСЂ]/i) ||
-                     text.match(/[РЎСЃ]С‚РѕРёРјРѕСЃС‚СЊ[^\d]*(\d[\d\s]+)/i) ||
-                     text.match(/[Р¦С†]РµРЅР°[^\d]*(\d[\d\s]+)/i);
-  const price = priceMatch ? parseInt(priceMatch[1].replace(/\s/g,'')) : null;
+  // Price: "РЎС‚РѕРёРјРѕСЃС‚СЊ: 23 000 в‚Ѕ" or "Р¦РµРЅР°: 1000в‚Ѕ" or just "23000в‚Ѕ"
+  const priceMatch = 
+    text.match(/[РЎСЃ]С‚РѕРёРјРѕСЃС‚СЊ[:\s-]+(\d[\d\s]*)\s*[в‚ЅСЂ]/u) ||
+    text.match(/[Р¦С†]РµРЅР°[:\s-]+(\d[\d\s]*)\s*[в‚ЅСЂ]/u) ||
+    text.match(/(\d[\d\s]{2,})\s*[в‚ЅСЂ]/u);
+  const price = priceMatch ? parseInt(priceMatch[1].replace(/\s/g, '')) : null;
 
-  const sizesMatch = text.match(/[Р СЂ]Р°Р·РјРµСЂ[С‹Р°]?[:\s]*([0-9\/\-,\s]+)/i);
+  // Sizes: "Р Р°Р·РјРµСЂС‹: 39/40/41" or "Р Р°Р·РјРµСЂ: 39-45"
+  const sizesMatch = text.match(/[Р СЂ]Р°Р·РјРµСЂ[С‹Р°]?[:\s]+([0-9][0-9\/\-,\s]+)/u);
   const sizes = sizesMatch
-    ? sizesMatch[1].split(/[\/,]/).map(s=>s.trim()).filter(s=>s.match(/^\d+$/)).slice(0,10)
+    ? sizesMatch[1].split(/[\/,\-]/).map(s => s.trim()).filter(s => /^\d+$/.test(s)).slice(0, 10)
     : [];
 
-  const photo = msg.photo ? msg.photo[msg.photo.length-1].file_id : null;
+  const photo = msg.photo ? msg.photo[msg.photo.length - 1].file_id : null;
 
   return {
     id: `${msg.chat.username}_${msg.message_id}`,
@@ -67,32 +73,25 @@ function parsePost(msg, category) {
   };
 }
 
-// Webhook endpoint вЂ” accepts ALL paths with token
 app.post('*', (req, res) => {
   res.sendStatus(200);
   const update = req.body;
-  console.log('Update received:', JSON.stringify(update).substring(0, 200));
-
   const msg = update.channel_post;
   if (!msg || !msg.chat) return;
 
   const username = msg.chat.username;
   const category = CHANNELS[username];
-  if (!category) {
-    console.log('Unknown channel:', username);
-    return;
-  }
+  if (!category) return;
 
   const product = parsePost(msg, category);
-  if (!product) {
-    console.log('Could not parse post');
-    return;
-  }
+  if (!product) { console.log('Could not parse:', msg.text || msg.caption); return; }
 
   const products = loadDB();
-  products.unshift(product);
+  const idx = products.findIndex(p => p.id === product.id);
+  if (idx > -1) products[idx] = product;
+  else products.unshift(product);
   saveDB(products.slice(0, 2000));
-  console.log(`вњ… Saved: ${product.name} (${category})`);
+  console.log(`Saved: ${product.name} | ${product.price} | ${category}`);
 });
 
 app.get('/products', (req, res) => {
