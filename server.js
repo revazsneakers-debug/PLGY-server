@@ -1,6 +1,5 @@
 const express = require('express');
 const https = require('https');
-const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const app = express();
@@ -8,7 +7,6 @@ const app = express();
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const PORT = process.env.PORT || 3000;
 const DB_FILE = '/tmp/products.json';
-const PENDING_FILE = '/tmp/pending.json';
 const PHOTOS_DIR = '/tmp/photos';
 
 if (!fs.existsSync(PHOTOS_DIR)) fs.mkdirSync(PHOTOS_DIR);
@@ -24,7 +22,8 @@ const CHANNELS = {
   'plgyposuda':       '\u0414\u043b\u044f \u0434\u043e\u043c\u0430',
 };
 
-const timers = {};
+// Temporary storage for forwarded album parts: key = original_message_id
+const albumBuffer = {}; // { msgId: { text, caption, photos: [], category, timer } }
 
 app.use(express.json());
 app.use((req, res, next) => { res.header('Access-Control-Allow-Origin', '*'); next(); });
@@ -35,11 +34,6 @@ function loadDB() {
   return [];
 }
 function saveDB(p) { try { fs.writeFileSync(DB_FILE, JSON.stringify(p), 'utf8'); } catch(e) {} }
-function loadPending() {
-  try { if (fs.existsSync(PENDING_FILE)) return JSON.parse(fs.readFileSync(PENDING_FILE, 'utf8')); } catch(e) {}
-  return {};
-}
-function savePending(p) { try { fs.writeFileSync(PENDING_FILE, JSON.stringify(p), 'utf8'); } catch(e) {} }
 
 function tgGet(url) {
   return new Promise((resolve, reject) => {
@@ -63,21 +57,17 @@ function downloadFile(url, dest) {
 async function savePhoto(fileId) {
   try {
     const info = await tgGet(`https://api.telegram.org/bot${BOT_TOKEN}/getFile?file_id=${fileId}`);
-    if (!info.ok) { console.log('getFile failed:', JSON.stringify(info)); return null; }
-    const tgUrl = `https://api.telegram.org/file/bot${BOT_TOKEN}/${info.result.file_path}`;
+    if (!info.ok) { console.log('getFile failed:', info.description); return null; }
+    const url = `https://api.telegram.org/file/bot${BOT_TOKEN}/${info.result.file_path}`;
     const ext = path.extname(info.result.file_path) || '.jpg';
-    const filename = Date.now() + ext;
-    const dest = path.join(PHOTOS_DIR, filename);
-    await downloadFile(tgUrl, dest);
+    const filename = Date.now() + '_' + Math.random().toString(36).slice(2) + ext;
+    await downloadFile(url, path.join(PHOTOS_DIR, filename));
     console.log('Photo saved:', filename);
     return filename;
-  } catch(e) {
-    console.error('Photo error:', e.message);
-    return null;
-  }
+  } catch(e) { console.error('Photo error:', e.message); return null; }
 }
 
-function parseText(text, channel, date, msgId) {
+function parseText(text) {
   if (!text || text.length < 3) return null;
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
   const name = lines[0].replace(/[\u{1F000}-\u{1FFFF}]/gu, '').trim();
@@ -94,94 +84,106 @@ function parseText(text, channel, date, msgId) {
     const m = line.match(/\u0420\u0430\u0437\u043c\u0435\u0440[:\s]+([A-Za-z0-9][A-Za-z0-9\/\-,\s]+)/iu);
     if (m) { sizes = m[1].split(/[\-\/,]/).map(s=>s.trim()).filter(s=>s.length>0).slice(0,10); break; }
   }
-
-  return { name, price, sizes, id: `${channel}_${msgId}`, channel, date };
+  return { name, price, sizes };
 }
 
-async function flushGroup(groupId) {
-  if (timers[groupId]) { clearTimeout(timers[groupId]); delete timers[groupId]; }
-  const pending = loadPending();
-  const msgs = pending[groupId];
-  if (!msgs || !msgs.length) return;
-  delete pending[groupId];
-  savePending(pending);
+async function flushAlbum(key) {
+  const buf = albumBuffer[key];
+  if (!buf) return;
+  clearTimeout(buf.timer);
+  delete albumBuffer[key];
 
-  console.log(`Flushing group ${groupId}, ${msgs.length} messages`);
+  const text = buf.caption || buf.text;
+  const parsed = parseText(text);
+  if (!parsed) { console.log('Could not parse album text'); return; }
 
-  // Find message with caption (product info)
-  const captionMsg = msgs.find(m => m.caption);
-  // Find any message with photo
-  const photoMsg = msgs.find(m => m.photo);
-
-  if (!captionMsg) { console.log('No caption in group'); return; }
-
-  const category = CHANNELS[captionMsg.chat.username];
-  if (!category) return;
-
-  const parsed = parseText(captionMsg.caption, captionMsg.chat.username, captionMsg.date, captionMsg.message_id);
-  if (!parsed) return;
-
-  // Get photo from caption message or any other in group
-  const bestPhotoMsg = captionMsg.photo ? captionMsg : photoMsg;
+  // Download first photo
   let photoName = null;
-  if (bestPhotoMsg && bestPhotoMsg.photo) {
-    const fileId = bestPhotoMsg.photo[bestPhotoMsg.photo.length - 1].file_id;
-    console.log('Downloading photo, fileId:', fileId.substring(0, 20) + '...');
-    photoName = await savePhoto(fileId);
+  if (buf.photos.length > 0) {
+    photoName = await savePhoto(buf.photos[0]);
   }
 
-  const product = { ...parsed, category, photo: photoName };
+  const product = {
+    id: `fwd_${key}`,
+    channel: buf.channel,
+    category: buf.category,
+    name: parsed.name,
+    price: parsed.price,
+    sizes: parsed.sizes,
+    photo: photoName,
+    date: buf.date,
+  };
+
   const products = loadDB();
   const idx = products.findIndex(p => p.id === product.id);
   if (idx > -1) products[idx] = product;
   else products.unshift(product);
   saveDB(products.slice(0, 2000));
-  console.log('Saved:', product.name, '|', product.price, '|', product.photo || 'no photo');
-}
-
-async function processSingle(msg, category) {
-  const text = msg.text || msg.caption || '';
-  const parsed = parseText(text, msg.chat.username, msg.date, msg.message_id);
-  if (!parsed) return;
-
-  let photoName = null;
-  if (msg.photo) {
-    const fileId = msg.photo[msg.photo.length - 1].file_id;
-    photoName = await savePhoto(fileId);
-  }
-
-  const product = { ...parsed, category, photo: photoName };
-  const products = loadDB();
-  const idx = products.findIndex(p => p.id === product.id);
-  if (idx > -1) products[idx] = product;
-  else products.unshift(product);
-  saveDB(products.slice(0, 2000));
-  console.log('Saved:', product.name, '|', product.price, '|', product.photo || 'no photo');
+  console.log('Saved (forwarded):', product.name, '|', product.price, '|', product.photo || 'no photo');
 }
 
 app.post('*', (req, res) => {
   res.sendStatus(200);
-  const msg = req.body.channel_post;
-  if (!msg || !msg.chat) return;
+  const update = req.body;
 
-  const category = CHANNELS[msg.chat.username];
-  if (!category) return;
-
-  console.log('Got post from', msg.chat.username, '| has photo:', !!msg.photo, '| has caption:', !!msg.caption, '| group:', msg.media_group_id || 'none');
-
-  if (msg.media_group_id) {
-    const pending = loadPending();
-    if (!pending[msg.media_group_id]) pending[msg.media_group_id] = [];
-    pending[msg.media_group_id].push(msg);
-    savePending(pending);
-
-    // Reset timer on each new message in group вЂ” flush 4s after last message
-    if (timers[msg.media_group_id]) clearTimeout(timers[msg.media_group_id]);
-    timers[msg.media_group_id] = setTimeout(() => flushGroup(msg.media_group_id), 4000);
+  // в”Ђв”Ђ Channel post (no photo expected here for albums, but handle single posts) в”Ђв”Ђ
+  const ch = update.channel_post;
+  if (ch && ch.chat) {
+    const category = CHANNELS[ch.chat.username];
+    if (category && !ch.media_group_id) {
+      // Single post with photo
+      const text = ch.text || ch.caption || '';
+      const parsed = parseText(text);
+      if (parsed) {
+        (async () => {
+          let photoName = null;
+          if (ch.photo) photoName = await savePhoto(ch.photo[ch.photo.length-1].file_id);
+          const product = {
+            id: `${ch.chat.username}_${ch.message_id}`,
+            channel: ch.chat.username, category,
+            ...parsed, photo: photoName, date: ch.date,
+          };
+          const products = loadDB();
+          const idx = products.findIndex(p => p.id === product.id);
+          if (idx > -1) products[idx] = product; else products.unshift(product);
+          saveDB(products.slice(0, 2000));
+          console.log('Saved (channel single):', product.name, '|', product.photo || 'no photo');
+        })();
+      }
+    }
     return;
   }
 
-  processSingle(msg, category);
+  // в”Ђв”Ђ Private message to bot (forwarded posts) в”Ђв”Ђ
+  const msg = update.message;
+  if (!msg) return;
+
+  // Determine source channel from forward_origin or forward_from_chat
+  const fwdChat = msg.forward_origin?.chat || msg.forward_from_chat;
+  if (!fwdChat) return;
+
+  const username = fwdChat.username;
+  const category = CHANNELS[username];
+  if (!category) { console.log('Unknown forwarded channel:', username); return; }
+
+  // Use original message id as album key
+  const origId = msg.forward_origin?.message_id || msg.forward_from_message_id || msg.message_id;
+  const key = `${username}_${origId}`;
+
+  console.log('Forwarded from', username, '| photo:', !!msg.photo, '| caption:', !!(msg.caption||msg.text), '| key:', key);
+
+  if (!albumBuffer[key]) {
+    albumBuffer[key] = { channel: username, category, date: msg.date, photos: [], caption: null, text: null };
+  }
+  const buf = albumBuffer[key];
+
+  if (msg.caption) buf.caption = msg.caption;
+  if (msg.text) buf.text = msg.text;
+  if (msg.photo) buf.photos.push(msg.photo[msg.photo.length-1].file_id);
+
+  // Reset flush timer
+  if (buf.timer) clearTimeout(buf.timer);
+  buf.timer = setTimeout(() => flushAlbum(key), 3000);
 });
 
 app.get('/products', (req, res) => {
