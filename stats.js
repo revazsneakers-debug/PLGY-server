@@ -75,7 +75,10 @@ async function sendReport() {
     const req = https.request(options, (res) => {
       let data = '';
       res.on('data', chunk => data += chunk);
-      res.on('end', () => resolve(JSON.parse(data)));
+      res.on('end', () => {
+        console.log('Report sent:', data);
+        resolve(JSON.parse(data));
+      });
     });
     req.on('error', resolve);
     req.write(message);
@@ -83,15 +86,21 @@ async function sendReport() {
   });
 }
 
+// Проверяем каждые 30 секунд для надёжности
 function checkAndSend() {
   const now = new Date();
   const moscowTime = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Moscow' }));
   const hour = moscowTime.getHours();
   const minute = moscowTime.getMinutes();
+  
+  console.log(`Current Moscow time: ${hour}:${minute}`);
+  
   if (hour === 23 && minute === 59) {
+    console.log('Sending report...');
     sendReport();
   }
 }
 
-setInterval(checkAndSend, 60000);
+setInterval(checkAndSend, 30000);
+checkAndSend();
 console.log('Stats bot started. Report will be sent at 23:59 Moscow time.');
