@@ -1,0 +1,17 @@
+name: Daily Report
+
+on:
+  schedule:
+    - cron: '59 20 * * *'
+
+jobs:
+  send-report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+      - run: node report.js
+        env:
+          STATS_BOT_TOKEN: ${{ secrets.STATS_BOT_TOKEN }}
