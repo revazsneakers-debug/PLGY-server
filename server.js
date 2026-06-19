@@ -246,4 +246,41 @@ app.post('/bot-webhook', express.json(), async (req, res) => {
   const r = https.request(options, () => {});
   r.write(message); r.end();
 });
+app.post('/report-webhook', express.json(), async (req, res) => {
+  res.sendStatus(200);
+  const msg = req.body.message;
+  if (!msg || !msg.text) return;
+  if (msg.text !== '/report' && msg.text !== '/start') return;
+
+  const chatId = msg.chat.id;
+
+  function sendTelegramMessage(text) {
+    const message = JSON.stringify({ chat_id: chatId, text, parse_mode: 'Markdown' });
+    const options = { hostname: 'api.telegram.org', path: `/bot${BOT_TOKEN}/sendMessage`, method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(message) } };
+    const r = https.request(options, () => {});
+    r.write(message); r.end();
+  }
+
+  if (msg.text === '/start') {
+    sendTelegramMessage('Привет! Напиши /report чтобы получить отчёт по постам за последние 24 часа.');
+    return;
+  }
+
+  const products = loadDB();
+  const now = Math.floor(Date.now() / 1000);
+  const dayStart = now - 86400;
+
+  let totalPosts = 0;
+  let report = `📊 *Отчёт за последние 24 часа*\n\n`;
+
+  for (const channelUsername of Object.keys(CHANNELS)) {
+    const count = products.filter(p => p.channel === channelUsername && p.date >= dayStart).length;
+    totalPosts += count;
+    const emoji = count > 0 ? '✅' : '❌';
+    report += `${emoji} @${channelUsername}: *${count}* постов\n`;
+  }
+
+  report += `\n📦 *Итого: ${totalPosts} постов*`;
+  sendTelegramMessage(report);
+});
 app.listen(PORT, () => console.log('PLGY server on port', PORT));
