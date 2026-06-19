@@ -207,22 +207,22 @@ const CHANNELS = [
 ];
 
 app.post('/bot-webhook', express.json(), async (req, res) => {
-  res.sendStatus(200);
-  const msg = req.body.message;
-  if (!msg || !msg.text) return;
-  if (msg.text !== '/report' && msg.text !== '/start') return;
+      res.sendStatus(200);
+      const msg = req.body.message;
+      if (!msg || !msg.text) return;
+      if (msg.text !== '/report' && msg.text !== '/start') return;
 
-  const chatId = msg.chat.id;
-  const STATS_BOT_TOKEN = process.env.STATS_BOT_TOKEN;
+      const chatId = msg.chat.id;
+      const STATS_BOT_TOKEN = process.env.STATS_BOT_TOKEN;
 
-  if (msg.text === '/start') {
-    const https = require('https');
-    const message = JSON.stringify({ chat_id: chatId, text: 'Привет! Напиши /report чтобы получить отчёт по постам за сутки.' });
-    const options = { hostname: 'api.telegram.org', path: `/bot${STATS_BOT_TOKEN}/sendMessage`, method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(message) } };
-    const r = require('https').request(options, () => {});
-    r.write(message); r.end();
-    return;
-  }
+      if (msg.text === '/start') {
+        const https = require('https');
+        const message = JSON.stringify({ chat_id: chatId, text: 'Привет! Напиши /report чтобы получить отчёт по постам за сутки.' });
+        const options = { hostname: 'api.telegram.org', path: `/bot${STATS_BOT_TOKEN}/sendMessage`, method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(message) } };
+        const r = require('https').request(options, () => {});
+        r.write(message); r.end();
+        return;
+      }
 
   const https = require('https');
   const db = loadDB();
