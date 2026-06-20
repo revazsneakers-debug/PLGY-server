@@ -195,36 +195,11 @@ app.get('/health', (req, res) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.end(JSON.stringify({ ok: true, products: loadDB().length }));
 });
-const CHANNELS = [
-  'plgymenshoes',
-  'plgywomanshoes',
-  'plgymenclothes',
-  'plgywomenclothes',
-  'plgymenbags',
-  'plgyaccessories',
-  'plgyjewelry',
-  'plgyposuda'
-];
+app.get('/health', (req, res) => {
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.end(JSON.stringify({ ok: true, products: loadDB().length }));
+});
 
-app.post('/bot-webhook', express.json(), async (req, res) => {
-      res.sendStatus(200);
-      const msg = req.body.message;
-      if (!msg || !msg.text) return;
-      if (msg.text !== '/report' && msg.text !== '/start') return;
-
-      const chatId = msg.chat.id;
-      const STATS_BOT_TOKEN = process.env.STATS_BOT_TOKEN;
-
-      if (msg.text === '/start') {
-        const https = require('https');
-        const message = JSON.stringify({ chat_id: chatId, text: 'Привет! Напиши /report чтобы получить отчёт по постам за сутки.' });
-        const options = { hostname: 'api.telegram.org', path: `/bot${STATS_BOT_TOKEN}/sendMessage`, method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(message) } };
-        const r = require('https').request(options, () => {});
-        r.write(message); r.end();
-        return;
-      }
-
- 
 app.post('/report-webhook', express.json(), async (req, res) => {
   res.sendStatus(200);
   const msg = req.body.message;
@@ -252,7 +227,7 @@ app.post('/report-webhook', express.json(), async (req, res) => {
   let totalPosts = 0;
   let report = `📊 *Отчёт за последние 24 часа*\n\n`;
 
-  for (const channelUsername of CHANNELS) {
+  for (const channelUsername of Object.keys(CHANNELS)) {
     const count = products.filter(p => p.channel === channelUsername && p.date >= dayStart).length;
     totalPosts += count;
     const emoji = count > 0 ? '✅' : '❌';
@@ -262,4 +237,5 @@ app.post('/report-webhook', express.json(), async (req, res) => {
   report += `\n📦 *Итого: ${totalPosts} постов*`;
   sendTelegramMessage(report);
 });
+
 app.listen(PORT, () => console.log('PLGY server on port', PORT));
