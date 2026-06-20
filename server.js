@@ -224,28 +224,7 @@ app.post('/bot-webhook', express.json(), async (req, res) => {
         return;
       }
 
-  const https = require('https');
-  const db = loadDB();
-  const now = Math.floor(Date.now() / 1000);
-  const dayStart = now - 86400;
-
-  let totalPosts = 0;
-  let report = `📊 *Отчёт за последние 24 часа*\n\n`;
-
-  for (const channel of CHANNELS) {
-    const count = db.filter(p => p.channel === channel && p.date >= dayStart).length;
-    totalPosts += count;
-    const emoji = count > 0 ? '✅' : '❌';
-    report += `${emoji} @${channel}: *${count}* постов\n`;
-  }
-
-  report += `\n📦 *Итого: ${totalPosts} постов*`;
-
-  const message = JSON.stringify({ chat_id: chatId, text: report, parse_mode: 'Markdown' });
-  const options = { hostname: 'api.telegram.org', path: `/bot${STATS_BOT_TOKEN}/sendMessage`, method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(message) } };
-  const r = https.request(options, () => {});
-  r.write(message); r.end();
-});
+ 
 app.post('/report-webhook', express.json(), async (req, res) => {
   res.sendStatus(200);
   const msg = req.body.message;
