@@ -252,7 +252,7 @@ app.post('/report-webhook', express.json(), async (req, res) => {
   let totalPosts = 0;
   let report = `📊 *Отчёт за последние 24 часа*\n\n`;
 
-  for (const channelUsername of Object.keys(CHANNELS)) {
+  for (const channelUsername of CHANNELS) {
     const count = products.filter(p => p.channel === channelUsername && p.date >= dayStart).length;
     totalPosts += count;
     const emoji = count > 0 ? '✅' : '❌';
